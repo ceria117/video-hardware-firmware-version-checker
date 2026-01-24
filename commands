@@ -1,0 +1,3 @@
+source firmware/bin/activate
+pip install gradio
+pip install pandas

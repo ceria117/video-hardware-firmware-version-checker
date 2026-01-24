@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Debug artifacts
+/debug_roland/
+/debug_panasonic/
+/debug_decimator/
+/debug_*/*
+
+# Local data
+*.sqlite3
+fetch_cache.json
+
+# OS
+.DS_Store
+Thumbs.db
