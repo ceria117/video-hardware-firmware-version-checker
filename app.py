@@ -1314,4 +1314,4 @@ with gr.Blocks(title="Firmware Tracker") as demo:
         demo.load(on_refresh_logs, outputs=[logs_table])
         demo.load(lambda: CURRENT_DB_PATH, outputs=[current_db])
 
-demo.launch(server_name="0.0.0.0", server_port=7860, css=TABLE_CSS)
+demo.launch(server_name="127.0.0.1", server_port=7860, css=TABLE_CSS)
