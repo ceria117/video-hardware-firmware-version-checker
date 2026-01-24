@@ -16,3 +16,6 @@ fetch_cache.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Local venv
+/firmware/
