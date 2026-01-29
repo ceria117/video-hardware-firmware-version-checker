@@ -12,11 +12,41 @@ import pandas as pd
 from typing import Optional, List, Dict
 import gradio as gr
 
+CONFIG_PATH = Path(__file__).with_name("config.json")
 DEFAULT_DB_PATH = "firmware_tracker.sqlite3"
 TEST_DB_PATH = "test_firmware_tracker.sqlite3"
-CURRENT_DB_PATH = DEFAULT_DB_PATH
+SERVER_NAME = "0.0.0.0"
+SERVER_PORT = 7860
+SCRAPE_TTL_MINUTES = 60
 MAX_LOGS = 500
 LOG_BUFFER: List[dict] = []
+
+def load_config() -> dict:
+    if not CONFIG_PATH.exists():
+        return {}
+    try:
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[WARN] Failed to load config.json: {e}")
+    return {}
+
+CONFIG = load_config()
+DEFAULT_DB_PATH = str(CONFIG.get("db_path", DEFAULT_DB_PATH))
+SERVER_NAME = str(CONFIG.get("server_name", SERVER_NAME))
+try:
+    SERVER_PORT = int(CONFIG.get("server_port", SERVER_PORT))
+except (TypeError, ValueError):
+    print("[WARN] Invalid server_port in config.json; using default 7860.")
+try:
+    SCRAPE_TTL_MINUTES = int(CONFIG.get("scrape_ttl_minutes", SCRAPE_TTL_MINUTES))
+except (TypeError, ValueError):
+    print("[WARN] Invalid scrape_ttl_minutes in config.json; using default 60.")
+
+CACHE_TTL_SECONDS = max(60, SCRAPE_TTL_MINUTES * 60)
+CURRENT_DB_PATH = DEFAULT_DB_PATH
 
 
 # -------------------------
@@ -274,7 +304,6 @@ ROLAND_DEBUG_DIR = Path(__file__).with_name("debug_roland")
 DECIMATOR_DEBUG_DIR = Path(__file__).with_name("debug_decimator")
 PANASONIC_DEBUG_DIR = Path(__file__).with_name("debug_panasonic")
 FETCH_CACHE_PATH = Path(__file__).with_name("fetch_cache.json")
-CACHE_TTL_SECONDS = 60 * 60  # 1 hour
 
 def load_provider_catalog() -> Dict[str, Dict[str, Dict[str, str]]]:
     if not PROVIDER_CATALOG_PATH.exists():
@@ -308,6 +337,10 @@ def log_warn(msg: str) -> None:
 
 def log_error(msg: str) -> None:
     add_log("ERROR", msg)
+
+def log_audit(msg: str) -> None:
+    ts = datetime.datetime.now().strftime("%m/%d/%Y %I:%M:%S%p")
+    print(f"[AUDIT] {ts} {msg}")
 
 def add_log(level: str, msg: str) -> None:
     ts = datetime.datetime.now().strftime("%m/%d/%Y %I:%M:%S%p")
@@ -1131,6 +1164,12 @@ def on_use_db(path: str):
     init_db()
     return CURRENT_DB_PATH
 
+def on_app_load(request: gr.Request):
+    client = "unknown"
+    if request and request.client:
+        client = request.client.host
+    log_audit(f"Client connected from {client}")
+
 
 # -------------------------
 # Build app
@@ -1314,4 +1353,6 @@ with gr.Blocks(title="Firmware Tracker") as demo:
         demo.load(on_refresh_logs, outputs=[logs_table])
         demo.load(lambda: CURRENT_DB_PATH, outputs=[current_db])
 
-demo.launch(server_name="127.0.0.1", server_port=7860, css=TABLE_CSS)
+    demo.load(on_app_load, outputs=None)
+
+demo.launch(server_name=SERVER_NAME, server_port=SERVER_PORT, css=TABLE_CSS)
