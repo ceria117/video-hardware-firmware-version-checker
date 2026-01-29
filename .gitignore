@@ -14,6 +14,8 @@ __pycache__/
 fetch_cache.json
 config.json
 Caddyfile
+/logs/
+client_aliases.json
 
 # OS
 .DS_Store

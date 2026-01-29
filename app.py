@@ -5,6 +5,7 @@ import json
 import re
 import html as html_lib
 from pathlib import Path
+import shutil
 from urllib import request, parse
 from urllib.error import URLError, HTTPError
 import ssl
@@ -20,6 +21,12 @@ SERVER_PORT = 7860
 SCRAPE_TTL_MINUTES = 60
 MAX_LOGS = 500
 LOG_BUFFER: List[dict] = []
+LOG_DIR = Path(__file__).with_name("logs")
+AUDIT_LOG_PATH = LOG_DIR / "audit.log"
+APP_LOG_PATH = LOG_DIR / "app.log"
+AUDIT_BACKUP_DIR = LOG_DIR / "audit_backups"
+APP_BACKUP_DIR = LOG_DIR / "app_backups"
+CLIENT_ALIASES_PATH = Path(__file__).with_name("client_aliases.json")
 
 def load_config() -> dict:
     if not CONFIG_PATH.exists():
@@ -47,6 +54,39 @@ except (TypeError, ValueError):
 
 CACHE_TTL_SECONDS = max(60, SCRAPE_TTL_MINUTES * 60)
 CURRENT_DB_PATH = DEFAULT_DB_PATH
+CLIENT_ALIASES: Dict[str, str] = {}
+
+def load_client_aliases() -> Dict[str, str]:
+    if not CLIENT_ALIASES_PATH.exists():
+        return {}
+    try:
+        with CLIENT_ALIASES_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {str(k): str(v) for k, v in data.items()}
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[WARN] Failed to load client_aliases.json: {e}")
+    return {}
+
+def _backup_log(src: Path, backup_dir: Path) -> None:
+    if not src.exists() or src.stat().st_size == 0:
+        return
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = backup_dir / f"{src.stem}_{ts}{src.suffix}"
+    try:
+        shutil.copy2(src, dest)
+        src.write_text("", encoding="utf-8")
+    except OSError as e:
+        print(f"[WARN] Failed to backup log {src}: {e}")
+
+def setup_logging() -> None:
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        _backup_log(AUDIT_LOG_PATH, AUDIT_BACKUP_DIR)
+        _backup_log(APP_LOG_PATH, APP_BACKUP_DIR)
+    except OSError as e:
+        print(f"[WARN] Failed to initialize log directories: {e}")
 
 
 # -------------------------
@@ -341,6 +381,15 @@ def log_error(msg: str) -> None:
 def log_audit(msg: str) -> None:
     ts = datetime.datetime.now().strftime("%m/%d/%Y %I:%M:%S%p")
     print(f"[AUDIT] {ts} {msg}")
+    try:
+        existing = []
+        if AUDIT_LOG_PATH.exists():
+            existing = AUDIT_LOG_PATH.read_text(encoding="utf-8").splitlines()
+        existing.append(f"{ts} {msg}")
+        existing = existing[-500:]
+        AUDIT_LOG_PATH.write_text("\n".join(existing) + ("\n" if existing else ""), encoding="utf-8")
+    except OSError as e:
+        print(f"[WARN] Failed to write audit log: {e}")
 
 def add_log(level: str, msg: str) -> None:
     ts = datetime.datetime.now().strftime("%m/%d/%Y %I:%M:%S%p")
@@ -348,6 +397,11 @@ def add_log(level: str, msg: str) -> None:
     if len(LOG_BUFFER) > MAX_LOGS:
         del LOG_BUFFER[:len(LOG_BUFFER) - MAX_LOGS]
     print(f"[{level}] {msg}")
+    try:
+        with APP_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(f"{ts} [{level}] {msg}\n")
+    except OSError as e:
+        print(f"[WARN] Failed to write app log: {e}")
 
 def fetch_text(url: str, timeout: int = 15, verify_ssl: bool = True) -> Optional[str]:
     try:
@@ -1166,14 +1220,20 @@ def on_use_db(path: str):
 
 def on_app_load(request: gr.Request):
     client = "unknown"
+    agent = "unknown"
     if request and request.client:
         client = request.client.host
-    log_audit(f"Client connected from {client}")
+    if request and request.headers:
+        agent = request.headers.get("user-agent", "unknown")
+    label = CLIENT_ALIASES.get(client, client)
+    log_audit(f"Client connected from {label} ({client}) | UA: {agent}")
 
 
 # -------------------------
 # Build app
 # -------------------------
+setup_logging()
+CLIENT_ALIASES = load_client_aliases()
 init_db()
 
 CATEGORIES = ["Switcher", "Camera", "PTZ", "Controller", "Encoder", "Other"]
