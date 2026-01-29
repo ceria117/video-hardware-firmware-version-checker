@@ -1,0 +1,3 @@
+http://raspi3.tailnet-xxxx.ts.net {
+    reverse_proxy 127.0.0.1:7860
+}
